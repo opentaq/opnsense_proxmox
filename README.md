@@ -36,7 +36,7 @@ ansible-playbook -i inventory.yml install_opnsense.yml
     </thead>
     <tbody>
         <tr>
-            <td colspan="3" style="text-align:center"><strong>Globals</strong></td>
+            <td colspan="3"><center><strong>Globals</strong></center></td>
         </tr>
         <tr>
             <td>_install_directory</td>
