@@ -64,7 +64,7 @@ ansible-playbook -i inventory.yml install_opnsense.yml
             <td>System Disk size. <code>'10G'</code> should be plenty enough for a small homelab.</td>
         </tr>
         <tr>
-            <td rowspan="4" style="vertical-align:top"><strong>WAN</strong></td>
+            <td rowspan="5" style="vertical-align:top"><strong>WAN</strong></td>
             <td>external_ip</td>
             <td><code>'192.168.1.85'</code></td>
             <td>External IP of the VM. Alternatively, <code>'dhcp'</code> should work as well.</td>
