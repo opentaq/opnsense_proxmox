@@ -26,6 +26,9 @@ ansible-playbook -i inventory.yml install_opnsense.yml
 
 ## List of Variables
 
+<style>
+    td.strong { text-align:center !important; }
+</style>
 <table>
     <thead>
         <tr>
@@ -36,7 +39,7 @@ ansible-playbook -i inventory.yml install_opnsense.yml
     </thead>
     <tbody>
         <tr>
-            <td colspan="3"><center><strong>Globals</strong></center></td>
+            <td colspan="3"><strong>Globals</strong></td>
         </tr>
         <tr>
             <td>_install_directory</td>
