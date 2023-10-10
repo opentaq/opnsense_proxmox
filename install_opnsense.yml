@@ -1,0 +1,251 @@
+---
+- name: Deploy and Configure OPNsense on Proxmox
+  gather_facts: no
+  hosts: proxmox-nodes
+  become: false
+  vars:
+    mac_addresses: []
+  vars_files:
+    - group_vars/all.yml
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Ensure necessary packages are installed
+      apt:
+        name:
+          - python3-lxml
+          - python3-pip
+          - python3-pexpect
+        state: present
+
+    - name: Ensure {{ _install_directory }} exists
+      file:
+        path: "{{ _install_directory }}"
+        state: directory
+
+    - name: Create directory for virtual FAT drive
+      file:
+        path: "{{ _install_directory }}/qemu_{{ vm_id }}_vfat/conf"
+        state: directory
+
+###########################################################################################
+# OPNsense Configuration
+###########################################################################################
+
+    - name: Download OPNsense default configuration file
+      get_url:
+        url: "{{ opnsense_config_url }}"
+        dest: "{{ _install_directory }}/opnsense-config.xml"
+        validate_certs: no
+
+    - name: Adjust Configuration
+      xml:
+        path: "{{ _install_directory }}/opnsense-config.xml"
+        xpath: "{{ item.xpath }}"
+        value: "{{ item.value }}"
+      loop:
+        - { xpath: '/opnsense/interfaces/wan/if', value: '{{ wan_interface }}' }
+        - { xpath: '/opnsense/interfaces/wan/ipaddr', value: '{{ external_ip }}' }
+        - { xpath: '/opnsense/interfaces/wan/mtu', value: '{{ mtu }}' }
+        - { xpath: '/opnsense/interfaces/wan/gateway', value: '{{ gateway }}' }
+        - { xpath: '/opnsense/interfaces/wan/subnet', value: '{{ subnet }}' }
+        - { xpath: '/opnsense/system/user/password', value: "{{ admin_password | password_hash('sha512') }}" }
+
+    - name: Do not block private networks on WAN
+      xml:
+        path: "{{ _install_directory }}/opnsense-config.xml"
+        xpath: "/opnsense/interfaces/wan/blockpriv"
+        state: absent
+
+    - name: Do not block bogon networks on WAN
+      xml:
+        path: "{{ _install_directory }}/opnsense-config.xml"
+        xpath: "/opnsense/interfaces/wan/blockbogons"
+        state: absent
+
+    - name: Define LAN XML
+      set_fact:
+        lan_xml: |
+          {{ (lan_xml | default('')) +
+            '    <' + item.id + '>\n' +
+            '      <enable>1</enable>\n' +
+            '      <descr>' + item.description + '</descr>\n' +
+            '      <ipaddr>' + item.ip + '</ipaddr>\n' +
+            '      <subnet>' + item.subnet + '</subnet>\n' +
+            '      <if>' + item.interface + '</if>\n' +
+            '      <mtu>' + item.mtu + '</mtu>\n' +
+            '      <ipaddrv6>track6</ipaddrv6>\n' +
+            '      <subnetv6>64</subnetv6>\n' +
+            '      <media/>\n' +
+            '      <mediaopt/>\n' +
+            '      <track6-interface>wan</track6-interface>\n' +
+            '      <track6-prefix-id>0</track6-prefix-id>\n'
+            '    </' + item.id + '>' }}
+      loop: "{{ lan_networks }}"
+
+    - name: Remove existing LAN element
+      xml:
+        path: "{{ _install_directory }}/opnsense-config.xml"
+        xpath: "/opnsense/interfaces/lan"
+        state: absent
+
+    - name: Inject new LAN XML
+      lineinfile:
+        path: "{{ _install_directory }}/opnsense-config.xml"
+        backrefs: yes
+        regexp: '(</interfaces>)'
+        line: '{{ lan_xml }}</interfaces>'
+
+    - name: Add enablenatreflectionhelper node to opnsense/system section
+      xml:
+        path: "{{ _install_directory }}/opnsense-config.xml"
+        xpath: '/opnsense/system'
+        add_children:
+          - enablenatreflectionhelper: 'yes'
+      when: enable_outbound_nat | bool
+
+    - name: Update WebGUI Port to {{ webgui_port }}
+      lineinfile:
+        path: "{{ _install_directory }}/opnsense-config.xml"
+        backrefs: yes
+        regexp: '(</webgui>)'
+        line: '<port>{{ webgui_port }}</port></webgui>'
+      when: enable_webgui_via_wan | bool
+
+    - name: Enable WebGUI access via WAN on port {{ webgui_port }}
+      block:
+        - name: Generate firewall rule XML
+          set_fact:
+            firewall_rule_xml: |
+              <rule>
+                <type>pass</type>
+                <ipprotocol>inet</ipprotocol>
+                <statetype>keep state</statetype>
+                <direction>in</direction>
+                <floating>yes</floating>
+                <quick>1</quick>
+                <protocol>tcp</protocol>
+                <source>
+                  <any>1</any>
+                </source>
+                <destination>
+                  <network>(self)</network>
+                  <port>{{ webgui_port }}</port>
+                </destination>
+              </rule>
+
+        - name: Insert firewall rule to allow WebGUI access via WAN
+          replace:
+            path: "{{ _install_directory }}/opnsense-config.xml"
+            regexp: '(</filter>)'
+            replace: '  {{ firewall_rule_xml }}\n\1'
+      when: enable_webgui_via_wan | bool
+
+    - name: Copy configuration to the VFAT directory
+      copy:
+        src: "{{ _install_directory }}/opnsense-config.xml"
+        dest: "{{ _install_directory }}/qemu_{{ vm_id }}_vfat/conf/config.xml"
+        remote_src: true
+    
+###########################################################################################
+# OPNsense Installation
+###########################################################################################
+
+    - name: Check whether the OPNsense image is already downloaded
+      stat:
+        path: "{{ _install_directory }}/{{ opnsense_image_path | basename | regex_replace('.bz2', '') }}"
+      register: opnsense_image
+
+    - name: Download OPNsense ISO
+      get_url:
+        url: "{{ opnsense_image_url }}"
+        dest: "{{ opnsense_image_path }}"
+        validate_certs: no
+      when: opnsense_image.stat.exists is not defined or not opnsense_image.stat.exists
+
+    - name: Extract OPNsense Nano Image
+      ansible.builtin.shell:
+        cmd: "bzip2 -f -d -v {{ opnsense_image_path }}"
+      when: opnsense_image.stat.exists is not defined or not opnsense_image.stat.exists
+
+    - name: Stop and Destroy Proxmox VM
+      shell: |
+        qm stop {{ vm_id }}
+        qm destroy {{ vm_id }}
+      ignore_errors: true
+      when: force_clean is defined and force_clean
+
+    - name: Create VM for OPNsense
+      shell: |
+        qm create {{ vm_id }} --name {{ vm_name }} --ostype l26 \
+        --onboot 1 --agent 1 \
+        --memory 2048 \
+        --net0 virtio,bridge={{ wan_bridge }} \
+        --args "-serial tcp:0.0.0.0:{{ vm_id }},server,nowait \
+                -drive file=fat:rw:{{ _install_directory }}/qemu_{{ vm_id }}_vfat/,if=none,id=drive-usb0,format=raw,cache=none \
+                -device usb-storage,id=drive-usb0,drive=drive-usb0,removable=on"
+
+    - name: Set initial index for additional interfaces
+      set_fact:
+        net_index: 1
+
+    - name: Create Network Interfaces and Assign Bridges
+      command: "qm set {{ vm_id }} --net{{ net_index }} virtio,bridge={{ item.bridge }}"
+      loop: "{{ lan_networks }}"
+      register: result
+
+    - name: Increment index
+      set_fact:
+        net_index: "{{ net_index + 1 }}"
+      when: result is changed
+
+    - name: Assign downloaded Nano Image to OPNsense VM
+      shell: "qm importdisk {{ vm_id }} {{ _install_directory }}/{{ opnsense_image_path | basename | regex_replace('.bz2', '') }} {{ storage_type }}"
+
+    - name: Attach the imported disk to the VM
+      shell: "qm set {{ vm_id }} --scsi0 {{ storage_type }}:vm-{{ vm_id }}-disk-0"
+
+    - name: Setup main drive and set Bootdisk
+      shell: |
+        qm set {{ vm_id }} --scsihw virtio-scsi-pci
+        qm set {{ vm_id }} --boot c --bootdisk scsi0
+
+    - name: Resize disk (Optional)
+      shell: "qm resize {{ vm_id }} scsi0 {{ disk_size }}"
+
+    - name: Start the VM
+      command: qm start {{ vm_id }}
+
+###########################################################################################
+# OPNsense Configuration Import
+###########################################################################################
+
+    - name: OPNsense - Waiting for OPNsense - Connecting via serial - console
+      wait_for:
+        port: "{{ vm_id }}"
+        host: "localhost"
+        delay: 10
+
+    - name: Trigger configuration import via telnet
+      expect:
+        command: "telnet -e ! localhost {{ vm_id }}"
+        timeout: 60
+        echo: true
+        responses:
+          'Press any key to start the configuration importer':
+            - ''
+          'Select device to import from':
+            - 'da1'
+      register: setup_opnsense
+      failed_when: setup_opnsense.msg is search('error')
+
+###########################################################################################
+# Done
+###########################################################################################
+
+    - name: Clean up downloaded ISO
+      file:
+        path: "{{ _install_directory }}"
+        state: absent

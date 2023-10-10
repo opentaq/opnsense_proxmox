@@ -1,0 +1,30 @@
+# Globals
+_install_directory: '/tmp/opnsense'
+
+# VM
+vm_id: <<YOUR VM ID>> # ie. 100
+storage_type: 'local-lvm' # or local-zfs 
+vm_name: 'opensense-vm' # or whatever you want
+disk_size: '10G'
+
+# WAN
+external_ip: <<YOUR EXTERNAL IP>> # or dhcp
+mtu: <<YOUR MTU>> # ie. 1500
+wan_interface: 'vtnet0' 
+gateway: <<YOUR GATEWAY IP>> 
+subnet: '24' # 24, 16, 8, etc.
+
+# LANs
+lan_networks:
+  - { id: 'lan', description: 'LAN', ip: '10.0.0.252', netmask: '24', mtu: '1450', bridge: 'kube01', interface: 'vtnet1', subnet: '24' }
+
+# OPNsense
+opnsense_image_url: "https://mirror.ams1.nl.leaseweb.net/opnsense/releases/23.7/OPNsense-23.7-nano-amd64.img.bz2"
+opnsense_image_path: "{{ _install_directory }}/OPNsense.img.bz2"
+opnsense_config_url: "https://raw.githubusercontent.com/opnsense/core/master/src/etc/config.xml.sample"
+
+# Additional Settings
+enable_webgui_via_wan: false
+enable_outbound_nat: false
+webgui_port: 8443
+admin_password: '<<YOUR ADMIN PASSWORD>>'
