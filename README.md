@@ -26,9 +26,6 @@ ansible-playbook -i inventory.yml install_opnsense.yml
 
 ## List of Variables
 
-<style>
-    td.strong { text-align:center !important; }
-</style>
 <table>
     <thead>
         <tr>
@@ -39,15 +36,9 @@ ansible-playbook -i inventory.yml install_opnsense.yml
     </thead>
     <tbody>
         <tr>
-            <td colspan="3"><strong>Globals</strong></td>
-        </tr>
-        <tr>
             <td>_install_directory</td>
             <td><code>'/tmp/opnsense'</code></td>
             <td>Directory in which the OPNsense image is downloaded to, and where the XML configuration is adjusted within.</td>
-        </tr>
-        <tr>
-            <td colspan="3"><strong>VM</strong></td>
         </tr>
         <tr>
             <td>vm_id</td>
@@ -68,9 +59,6 @@ ansible-playbook -i inventory.yml install_opnsense.yml
             <td>disk_size</td>
             <td><code>'10G'</code></td>
             <td>System Disk size. <code>'10G'</code> should be plenty enough for a small homelab.</td>
-        </tr>
-        <tr>
-            <td colspan="3"><strong>WAN</strong></td>
         </tr>
         <tr>
             <td>external_ip</td>
@@ -98,17 +86,11 @@ ansible-playbook -i inventory.yml install_opnsense.yml
             <td>The subnet to be used. Typically, it will be something like <code>'24'</code>.</td>
         </tr>
         <tr>
-            <td colspan="3"><strong>LANs</strong></td>
-        </tr>
-        <tr>
             <td>lan_networks</td>
             <td><code>- { id: 'lan', description: 'LAN', ip: '10.0.0.1', mtu: '1500', bridge: 'vmbr1', interface: 'vtnet1', subnet: '24' }</code></td>
             <td>List of LANs to be created. Each LAN is defined by these parameters:<ul><li>id: Id of the LAN in OPNsense</li>
                 <li>description: Description of the LAN in OPNsense</li><li>ip: IP within the LAN</li>
                 <li>subnet: Subnet to be used</li><li>bridge: Bridge-Device to be used on Proxmox</li><li>interface: Interface to be used for the LAN on OPNsense</li></ul></td>
-        </tr>
-        <tr>
-            <td colspan="3"><strong>OPNsense</strong></td>
         </tr>
         <tr>
             <td>opnsense_image_url</td>
@@ -124,9 +106,6 @@ ansible-playbook -i inventory.yml install_opnsense.yml
             <td>opnsense_config_url</td>
             <td><code>"https://raw.githubusercontent.com/opnsense/core/master/src/etc/config.xml.sample"</code></td>
             <td>URL of the sample XML-configuration file to be used as ... sample.</td>
-        </tr>
-        <tr>
-            <td colpan="3"><strong>Additional Settings</strong></td>
         </tr>
         <tr>
             <td>enable_webgui_via_wan</td>
