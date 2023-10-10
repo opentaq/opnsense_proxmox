@@ -9,14 +9,15 @@ disk_size: '10G'
 
 # WAN
 external_ip: <<YOUR EXTERNAL IP>> # or dhcp
-mtu: <<YOUR MTU>> # ie. 1500
-wan_interface: 'vtnet0' 
 gateway: <<YOUR GATEWAY IP>> 
 subnet: '24' # 24, 16, 8, etc.
+mtu: <<YOUR MTU>> # ie. 1500
+wan_interface: 'vtnet0' 
+wan_bridge: 'vmbr0'
 
 # LANs
 lan_networks:
-  - { id: 'lan', description: 'LAN', ip: '10.0.0.252', netmask: '24', mtu: '1450', bridge: 'kube01', interface: 'vtnet1', subnet: '24' }
+  - { id: 'lan', description: 'LAN', ip: '10.0.0.252', mtu: '1450', bridge: 'kube01', interface: 'vtnet1', subnet: '24' }
 
 # OPNsense
 opnsense_image_url: "https://mirror.ams1.nl.leaseweb.net/opnsense/releases/23.7/OPNsense-23.7-nano-amd64.img.bz2"

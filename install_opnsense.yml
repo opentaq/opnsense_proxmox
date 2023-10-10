@@ -112,7 +112,6 @@
         backrefs: yes
         regexp: '(</webgui>)'
         line: '<port>{{ webgui_port }}</port></webgui>'
-      when: enable_webgui_via_wan | bool
 
     - name: Enable WebGUI access via WAN on port {{ webgui_port }}
       block:
