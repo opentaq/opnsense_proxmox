@@ -9,15 +9,15 @@ The script will destroy a running VM based on the defined VM ID, if the variable
 
 ## Usage
 
-1. Install Ansible
+### 1. Install Ansible
 This highly depends on your environment, so please google that for yourself.
 
-2. Adjust the inventory
+### 2. Adjust the inventory
 Fill in the required information. Note: This script works with SSH-keys, not with passwords. 
 
-3. Adjust the variables in group_vars/all.yml
+### 3. Adjust the variables in group_vars/all.yml
 
-4. Run the playbook from the console:
+### 4. Run the playbook from the console:
 
 ```
 ansible-playbook -i inventory.yml install_opnsense.yml
