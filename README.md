@@ -16,6 +16,7 @@ This highly depends on your environment, so please google that for yourself.
 Fill in the required information. Note: This script works with SSH-keys, not with passwords. 
 
 ### 3. Adjust the variables in group_vars/all.yml
+See below for a list of variables.
 
 ### 4. Run the playbook from the console:
 
