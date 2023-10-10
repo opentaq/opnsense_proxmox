@@ -211,7 +211,7 @@
         qm set {{ vm_id }} --scsihw virtio-scsi-pci
         qm set {{ vm_id }} --boot c --bootdisk scsi0
 
-    - name: Resize disk (Optional)
+    - name: Resize disk
       shell: "qm resize {{ vm_id }} scsi0 {{ disk_size }}"
 
     - name: Start the VM
