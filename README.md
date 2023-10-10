@@ -39,7 +39,6 @@ ansible-playbook -i inventory.yml install_opnsense.yml
             <td colspan="3"><strong>Globals</strong></td>
         </tr>
         <tr>
-            <td><strong>Globals</strong></td>
             <td>_install_directory</td>
             <td><code>'/tmp/opnsense'</code></td>
             <td>Directory in which the OPNsense image is downloaded to, and where the XML configuration is adjusted within.</td>
