@@ -1,0 +1,23 @@
+---
+- name: Update apt cache
+  apt:
+    update_cache: yes
+
+- name: Ensure necessary packages are installed
+  apt:
+    name:
+      - python3-lxml
+      - python3-pip
+      - python3-pexpect
+      - telnet
+    state: present
+
+- name: Ensure {{ install_directory }} exists
+  file:
+    path: "{{ install_directory }}"
+    state: directory
+
+- name: Create directory for virtual FAT drive
+  file:
+    path: "{{ install_directory }}/qemu_{{ vm_id }}_vfat/conf"
+    state: directory

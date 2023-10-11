@@ -1,49 +1,241 @@
-# Roll out OPNsense on Proxmox Hosts 
+Deploy OPNsense on Proxmox
+==========================
 
-This is an Ansible playbook to roll out OPNsense on Proxmox. It is a simplified version of the _KPMA1985_'s script to be found here: https://github.com/kpma1985/ansible_proxmox_hetzner/tree/master.
+This role downloads and deploys a OPNsense Nano Image on Proxmox. It is loosely based on the ansible_proxmox_hetzner-role by KPMA1985 (https://github.com/kpma1985/ansible_proxmox_hetzner/tree/master). It allows to configure some base specifics so one ends up with a useful deployment.
 
-The playbook rolls out OPNsense with a minimum of two interfaces (WAN + x number of LAN-interfaces). You can simply adjust the interface configurations as described below. It will establish a rule to expose the WebGUI over the WAN interface, if that variable is set to true. It will enable Outbound NAT, if you want this to be enabled. You can define the root password to your liking.
+Requirements
+------------
 
-### NOTE
-The script will destroy a running VM based on the defined VM ID, if the variable _force_clean_ exists and is set to _true_.
+None specifically. Ansible. SSH. Proxmox Host. 
 
-## Usage
+Role Variables
+--------------
 
-### 1. Install Ansible
-This highly depends on your environment, so please google that for yourself.
+### Globals
+---
+Global variables for the Role.
 
-### 2. Adjust the inventory
-Fill in the required information. Note: This script works with SSH-keys, not with passwords. 
+- `install_directory`: Installation directory on Proxmox', defaults to `'/tmp/opnsense'`
+- `hostname` (optional): Hostname for the OPNsense installation, defaults to `'OPNsense'`. 
+- `domain` (optional): Domain portion of the OPNsense installation, defaults to `'localdomain.tld'`.
+- `timezone` (optional): Timezone for the installation, ie. `'Europe/Berlin'`.
+- `admin_password`: Password for the root account, defaults to `'ChangeMe123!'`.
+- `force_clean` (optional): Deletes an existing VM with the `vm_id` defined below. Acceptable values: `true` or `false`. Understood to be `false` when not explicitely set.
 
-### 3. Adjust the variables in group_vars/all.yml
-See below for a list of variables.
+### VM
+---
+VM-specific settings.
 
-### 4. Run the playbook from the console:
+- `vm_id`: Id of the VM to be created, ie. `2000`. **NOTE**: Role exection will fail when the VM already exists, see `force_clean` above.
+- `vm_storage_type` (optional): Type of the storage to be used. Check your Proxmox for details. Typical values are `'local-lvm'` or `'local-zfs'`. Defaults to `'local-lvm'`.
+- `vm_name` (optional): Name of the VM in Proxmox. Give it a name without spaces or underscores, defaults to `'opensense-vm'`.
+- `vm_disk_size` (optional): Size of the main disk drive of the VM. Defaults to `'10G'`.
+- `vm_memory` (optional): Memory allocation of the VM in MB, defaults to `2048`.
+- `vm_sockets` (optional): Number of CPU-sockets to assign to the VM. Defaults to `1`.
+- `vm_cores` (optional): Number of CPU-cores to assign to the VM. Defaults to `1`.
+- `vm_cpu_type` (optional): Type of CPU to assign. Defaults to `'x86-64-v2-AES'`, but can for example also be `'host'`.
+- `vm_start_on_boot` (optional): Indicates, whether the VM should be started automatically when the system boots. Defaults to `true`.
+
+### Gateways
+---
+Definition of Gateways. Optional.
+
+- `gateways`: List of gateways to be used.
+
+Each entry consists of the following parameters:
+- `name`: Name of the gateway, ie. `'WAN_GW'`.
+- `gateway`: IP-address of the gateway, ie. `'192.168.1.1'`.
+- `interface`: Interface to be used, ie. `'wan'`.
+- `priority` (optional): Priority of the gateway, defaults to `255`.
+- `default` (optional): Indicates whether the gateway is the default gateway, possible values are `true` and `false`, defaults to `true`.
+- `description` (optional): Descriptive text for the gateway.
+- `ipv6` (optional): Indicates whether the gateway is an IPv6-gateway, possible values are `true` and `false`, defaults to `false`.
+- `monitor` (otional): Indicates whether the gateway-IP should be monitored for availability, possible values are `true` and `false`, defaults to `false`.
+- `interval` (optional): Monitoring interval. Defaults to `1`.
+- `weight` (optional): Weight of the gateway. Defaults to `1`.
+
+Sample usage:
+```
+gateways:
+  - { name: 'WAN_GW', gateway: '192.168.1.1', interface: 'wan', default: true, description: 'WAN Gateway' }
+```
+
+### DNS Servers
+---
+Defines a list of DNS-servers to be used. Optional.
+
+- `dns_servers` (optional): List of DNS-servers, one per line.
+
+Sample usage:
+```
+dns_servers:
+  - '8.8.4.4'
+  - '9.9.9.9'
+```
+
+### WebGUI access
+---
+Defines settings for accessing the WebGUI. Triggers the creation of firewall rules for additional interfaces on which the WebGUI should be made available. Per OPNsense default, the WebGUI is exposed at the `LAN`-interface, once a `WAN`-interface is defined. **Adjust and handle with care!**
+
+- `webgui_port`: Sets the port on which the WebGUI is exposed. Default value is `8443`.
+- `additional_webgui_interfaces` (optional): Defines a list of additional interfaces on which the WebGUI is exposed. No need to include the `lan`-interface here.
+
+Sample usage:
+```
+additional_webgui_interfaces:
+  - 'wan'
+  - 'net' 
+```
+
+### WAN
+---
+Defines the WAN settings.
+
+- `wan_ip`: IP of the WAN interface, ie. `'192.168.1.85'`.
+- `wan_interface` (optional): Name of the WAN interface within OPNsense, defaults to `'vtnet0'`.
+- `wan_gateway` (optional): Name of the Gateway towards the external network, defaults to `'WAN_GW'`, **should match the gateway name as defined above**.
+- `wan_subnet` (optional): Subnet for the WAN, defaults to `'24'`.
+- `wan_mtu` (optional): MTU for the WAN net, defaults to `1` for the Proxmox host (which copies the settings from the virtual network bridge assigned), defaults to `1500` for OPNsense (which is the default for most networks).
+- `wan_bridge` (optional): Name of the virtual network bridge to be used from the Proxmox host, defaults to `'vmbr0'` if not set explicitely.
+
+### LANs
+---
+Defines the LAN settings.
+
+- `lan_networks`: List of LAN networks to be exposed internally.
+
+Each list entry consists of the following parameters:
+
+- `id`: Id of the network, ie. `'lan'`.
+- `ip`: IP-address of the network interface. ie. `'10.0.0.254'`.
+- `bridge`: Proxmox Network Bridge to be used, ie. `'vmbr1'`. 
+- `interface`: Interface-name within OPNsense, ie. `'vtnet1'`.
+- `description` (optional): Descriptive text, ie `'LAN'`.
+- `mtu` (optional): MTU for the network, defaults to `'1500'`.
+- `subnet` (optional): Subnet to be used, defaults to `'24'`.
+
+Sample usage:
 
 ```
-ansible-playbook -i inventory.yml install_opnsense.yml
+lan_networks:
+  - { id: 'lan', ip: '10.0.0.252', mtu: '1450', bridge: 'kube01', interface: 'vtnet1', subnet: '24' }
+  - { id: 'net', ip: '10.10.10.254', bridge: 'vmbr1', interface: 'vtnet2' }
 ```
 
-## List of Variables
+### OPNsense-Settings
+---
+Some OPNsense-specific settings.
 
-| Variable             | Sample Value                                                                                                              | Remarks                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-|:---------------------|:--------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| _install_directory | `'\/tmp\/opnsense'`                                                                                                      | Directory in which the OPNsense image is downloaded to, and where the XML configuration is adjusted within.                                                                                                                                                                                                                                                                                                                                                                         |
-| vm_id               | `2000`                                                                                                                   | ID of the VM to be created.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| vm_name            | `'opnsense-vm'`                                                                                                          | ID of the VM to be created.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| storage_type       | `'local_lvm'`                                                                                                            | Storage type to be used. Depending on your Proxmoxes config. Could also be like `'local_zfs'` or any other useful value.                                                                                                                                                                                                                                                                                                                                                            |
-| disk_size          | `'10G'`                                                                                                                  | System Disk size. `'10G'` should be plenty enough for a small homelab.                                                                                                                                                                                                                                                                                                                                                                                                               |
-| external_ip        | `'192.168.1.85'`                                                                                                         | External IP of the VM. Alternatively, `'dhcp'` should work as well.                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| mtu                | `1`                                                                                                                      | MTU of the network. Set it `1` to have it copied from the underlying Network Interface.                                                                                                                                                                                                                                                                                                                                                                                             |
-| wan_interface      | `'vtnet0'`                                                                                                               | Name of the interface to be used for WAN. Typically, it will be `'vtnet0'`, referring to the first virtual network adapter attached to the VM, but you can align it to your needs.                                                                                                                                                                                                                                                                                                  |
-| wan_bridge | `'vmbr0'` | The Proxmox-Bridge / Interface to be used. | 
-| gateway            | `'192.168.1.1'`                                                                                                          | IP of the gateway to be used. Typically, it will be the router within your environment. Leave it empty (`''`) to define no gateway.                                                                                                                                                                                                                                                                                                                                                  |
-| subnet             | `'24'`                                                                                                                   | The subnet to be used. Typically, it will be something like `'24'`.                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| lan_networks       | `- { id: 'lan', description: 'LAN', ip: '10.0.0.1', mtu: '1500', bridge: 'vmbr1', interface: 'vtnet1', subnet: '24' }` | List of LANs to be created. Each LAN is defined by these parameters:<ul><li>id: Id of the LAN in OPNsense</li><li>description: Description of the LAN in OPNsense</li><li>ip: IP within the LAN</li><li>subnet: Subnet to be used</li><li>bridge: Bridge-Device to be used on Proxmox</li><li>interface: Interface to be used for the LAN on OPNsense</li></ul>                                                         |
-| opnsense_image_url | `"https:\/\/mirror.ams1.nl.leaseweb.net\/opnsense\/releases\/23.7\/OPNsense-23.7-nano-amd64.img.bz2"`                 | Download-Link for the OPNsense-image to roll out. Use the nano-variant.                                                                                                                                                                                                                                                                                                                                                                                                               |
-| opnsense_image_path| `"{{ _install_directory }}\/OPNsense.img.bz2"`                                                                            | Where to store the downloaded image.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| opnsense_config_url| `"https:\/\/raw.githubusercontent.com\/opnsense\/core\/master\/src\/etc\/config.xml.sample"`                             | URL of the sample XML-configuration file to be used as ... sample.                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| enable_webgui_via_wan| `false`                                                                                                                 | Indicates whether the WebGUI should be exposed via the WAN interface. Useful values are `true` or `false`. Note: Exposing the WebGUI via WAN implies a huge risk when used outside a secure environment!                                                                                                                                                                                                                                                                            |
-| enable_outbound_nat| `false`                                                                                                                  | Indicates whether Outbound NAT should be enabled. Often required in Homelab-scenarios. Useful values are `true` or `false`.                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| webgui_port        | `8443`                                                                                                                   | Port of the WebGUI, regardless of being exposed externally or internally only. Recommendation: Don't leave it on 443, since then every SSL-traffic would need to be mapped to a different port.                                                                                                                                                                                                                                                                                                                                             |
-| admin_password     | `'ChangeMe123!'`                                                                                                          | Password for the root user. Adjust it to your own needs, but adjust it.                                                                                                                                                                                                                                                                                                                                                                                                               |
+- `enable_outbound_nat` (optional): Indicates, whether outbound NAT should be enabled, defaults to `false`.
+- `block_private_networks_on_wan` (optional): Indicates, whether Private Networks (ie. 192.168.0.0/16) should be allowed on the WAN interface. Defaults to `false`.
+- `block_bogons_on_wan` (optional): Indicates, whether Bogon Networks (impossible networks) should be allowed on the WAN interface. Defaults to `false`.
+
+### Misc
+---
+Defines miscellanous settings, ie. the image URL to be used.
+
+- `opnsense_image_url` (optional): The URL of the OPNsense Nano Image to be downloaded, defaults to `"https://mirror.ams1.nl.leaseweb.net/opnsense/releases/23.7/OPNsense-23.7-nano-amd64.img.bz2"`.
+- `opnsense_image_path` (optional): The local file name for the downloaded image, defaults to `"{{ install_directory }}/OPNsense.img.bz2"`.
+- `opnsense_config_url` (optional): The URL for the sample XML file to be used by the Role for configuring OPNsense. Defaults to `"https://raw.githubusercontent.com/opnsense/core/master/src/etc/config.xml.sample"`.
+
+
+Example Playbook
+----------------
+
+First: Clone the repo into a folder within the `roles`-subfolder:
+
+```
+mkdir -P opentaq_opnsense/roles
+cd opentaq_opnsense/roles
+git clone https://github.com/opentaq/opnsense_proxmox.git
+cd ..
+```
+
+Create an inventory file called `inventory.yml` pointing to your Proxmox host in the main directory:
+
+```
+all:
+  hosts:
+    proxmox:
+      ansible_host: 192.168.1.10
+      ansible_user: root
+```
+
+Then create a file called `playbook.yml` in the main folder, with something like this in it:
+
+```
+---
+- hosts: proxmox
+  roles:
+    - opnsense_proxmox
+  vars:
+    # Globals
+    hostname: 'bastion'
+    domain: 'opentaq.local'
+    enable_outbound_nat: true
+    admin_password: 'YouWillNeverGuessThis!'
+
+    # VM
+    vm_id: 2000
+    vm_storage_type: 'local-zfs'
+    vm_name: 'opentaq-vm'
+    vm_cpu_type: 'host'
+
+    # Gateways
+    gateways:
+      - { name: 'WAN_GW', gateway: '192.168.1.1', interface: 'wan', default: true, description: 'WAN Gateway' }
+    
+    # DNS-Servers
+    dns_servers:
+      - '8.8.4.4'
+      - '9.9.9.9'
+
+    # WAN
+    wan_ip: '192.168.1.85'
+    wan_interface: 'vtnet0'
+    wan_gateway: 'WAN_GW'
+    wan_bridge: 'vmbr0'
+
+    # LANs
+    lan_networks:
+      - { id: 'lan', description: 'LAN', ip: '10.0.0.252', mtu: '1450', bridge: 'kube01', interface: 'vtnet1', subnet: '24' }
+    
+    # WebGUI
+    webgui_port: 8443
+    additional_webgui_networks:
+      - "wan"
+
+```
+
+Adjust it to your needs and save it.
+
+You should now have this structure:
+
+```
+opentaq_opnsense/
+└── playbook.yml
+└── inventory.yml
+└── roles/
+      └── opnsense_proxmox/
+```
+
+Now you can execute the playbook from the main folder:
+
+```
+ansible-playbook playbook.yml -i inventory.yml
+```
+
+**Enjoy!**
+
+License
+-------
+
+Apache 2.0
+
+
+Author Information
+------------------
+
+Karsten Samaschke<br />
+opentaq.tv@gmail.com<br />
+https://opentaq.tv

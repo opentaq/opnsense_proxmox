@@ -1,0 +1,207 @@
+---
+- name: Download OPNsense default configuration file
+  get_url:
+    url: "{{ opnsense_config_url }}"
+    dest: "{{ install_directory }}/opnsense-config.xml"
+    validate_certs: no
+
+# -------------------------------------------------------------------------------------------------
+# Base configuration
+# -------------------------------------------------------------------------------------------------
+- name: Set admin password
+  xml:
+    path: "{{ install_directory }}/opnsense-config.xml"
+    xpath: '/opnsense/system/user'
+    value: '{{ admin_password }}'
+
+- name: Set hostname
+  xml:
+    path: "{{ install_directory }}/opnsense-config.xml"
+    xpath: '/opnsense/system/hostname'
+    value: '{{ hostname }}'
+  when: hostname is defined
+
+- name: Set domain
+  xml:
+    path: "{{ install_directory }}/opnsense-config.xml"
+    xpath: '/opnsense/system/domain'
+    value: '{{ domain }}'
+  when: domain is defined
+
+- name: Set DNS servers
+  xml:
+    path: "{{ install_directory }}/opnsense-config.xml"
+    xpath: '/opnsense/system/dnsserver'
+    value: '{{ item }}'
+  loop: '{{ dns_servers }}'
+  when: dns_servers is defined and dns_servers | length > 0
+
+- name: Set timezone
+  xml:
+    path: "{{ install_directory }}/opnsense-config.xml"
+    xpath: '/opnsense/system/timezone'
+    value: '{{ timezone }}'
+  when: timezone is defined
+
+- name: Do not block private networks on WAN
+  xml:
+    path: "{{ install_directory }}/opnsense-config.xml"
+    xpath: "/opnsense/interfaces/wan/blockpriv"
+    state: absent
+  when: block_private_networks_on_wan is defined and not block_private_networks_on_wan
+
+- name: Do not block bogon networks on WAN
+  xml:
+    path: "{{ install_directory }}/opnsense-config.xml"
+    xpath: "/opnsense/interfaces/wan/blockbogons"
+    state: absent
+  when: block_bogon_networks_on_wan is defined and not block_bogon_networks_on_wan
+
+- name: Add enablenatreflectionhelper node to opnsense/system section
+  xml:
+    path: "{{ install_directory }}/opnsense-config.xml"
+    xpath: '/opnsense/system'
+    add_children:
+      - enablenatreflectionhelper: 'yes'
+  when: enable_outbound_nat | bool
+
+- name: Update WebGUI Port to {{ webgui_port }}
+  lineinfile:
+    path: "{{ install_directory }}/opnsense-config.xml"
+    backrefs: yes
+    regexp: '(</webgui>)'
+    line: '<port>{{ webgui_port }}</port></webgui>'
+  when: webgui_port is defined
+
+- name: Disable initial wizzard
+  ansible.builtin.lineinfile:
+    path: "{{ install_directory }}/opnsense-config.xml"
+    state: absent
+    regexp: '<trigger_initial_wizard/>'
+
+# -------------------------------------------------------------------------------------------------
+# WAN configuration
+# -------------------------------------------------------------------------------------------------
+- name: Adjust WAN configuration
+  xml:
+    path: "{{ install_directory }}/opnsense-config.xml"
+    xpath: "{{ item.xpath }}"
+    value: "{{ item.value }}"
+  loop:
+    - { xpath: '/opnsense/interfaces/wan/if', value: '{{ wan_interface }}' }
+    - { xpath: '/opnsense/interfaces/wan/ipaddr', value: '{{ wan_ip }}' }
+    - { xpath: '/opnsense/interfaces/wan/mtu', value: '{{ ( wan_mtu | default("1500")) }}' }
+    - { xpath: '/opnsense/interfaces/wan/gateway', value: '{{ wan_gateway }}' }
+    - { xpath: '/opnsense/interfaces/wan/subnet', value: '{{ ( wan_subnet | default("24")) }}' }
+
+# -------------------------------------------------------------------------------------------------
+# LAN configuration
+# -------------------------------------------------------------------------------------------------
+- name: Define LAN XML
+  set_fact:
+    lan_xml: |
+      {{ (lan_xml | default('')) +
+        '    <' + item.id + '>\n' +
+        '      <enable>1</enable>\n' +
+        '      <descr>' + (item.description | default('')) + '</descr>\n' +
+        '      <ipaddr>' + item.ip + '</ipaddr>\n' +
+        '      <subnet>' + (item.subnet | default('')) + '</subnet>\n' +
+        '      <if>' + item.interface + '</if>\n' +
+        '      <mtu>' + (item.mtu | default('1500')) + '</mtu>\n' +
+        '      <ipaddrv6>track6</ipaddrv6>\n' +
+        '      <subnetv6>64</subnetv6>\n' +
+        '      <media/>\n' +
+        '      <mediaopt/>\n' +
+        '      <track6-interface>wan</track6-interface>\n' +
+        '      <track6-prefix-id>0</track6-prefix-id>\n'
+        '    </' + item.id + '>' }}
+  loop: "{{ lan_networks }}"
+
+- name: Remove existing LAN element
+  xml:
+    path: "{{ install_directory }}/opnsense-config.xml"
+    xpath: "/opnsense/interfaces/lan"
+    state: absent
+
+- name: Inject new LAN XML
+  lineinfile:
+    path: "{{ install_directory }}/opnsense-config.xml"
+    backrefs: yes
+    regexp: '(</interfaces>)'
+    line: '{{ lan_xml }}</interfaces>'
+
+# -------------------------------------------------------------------------------------------------
+# WebGUI access
+# -------------------------------------------------------------------------------------------------
+- name: Define WebGUI access rules
+  block:
+  - name: Generate firewall rule XML for networks other than LAN
+    set_fact:
+      webgui_rule_xml: |
+        {{ (webgui_rule_xml | default('')) +
+          '    <rule>\n' +
+          '      <type>pass</type>\n' +
+          '      <ipprotocol>inet</ipprotocol>\n' +
+          '      <statetype>keep state</statetype>\n' +
+          '      <direction>in</direction>\n' +
+          '      <floating>yes</floating>\n' +
+          '      <quick>1</quick>\n' +
+          '      <protocol>tcp</protocol>\n' +
+          '      <source>\n' +
+          '        <any>1</any>\n' +
+          '      </source>\n' +
+          '      <destination>\n' +
+          '        <network>(self)</network>\n' +
+          '      <port>{{ webgui_port }}</port>\n' +
+          '      </destination>\n' +
+          '    </rule>' }}
+    loop: "{{ additional_webgui_interfaces }}"
+
+  - name: Insert firewall rule to allow WebGUI access via WAN
+    replace:
+      path: "{{ install_directory }}/opnsense-config.xml"
+      regexp: '(</filter>)'
+      replace: '  {{ webgui_rule_xml }}\n\1'
+    when: webgui_rule_xml is defined and webgui_rule_xml | length > 0
+  when: additional_webgui_interfaces is defined and additional_webgui_interfaces | length > 0
+
+# -------------------------------------------------------------------------------------------------
+# Gateways
+# -------------------------------------------------------------------------------------------------
+- name: Define Gateways
+  block:
+  - name: Generate Gateway XML
+    set_fact:
+      gateway_xml: |
+        {{ (gateway_xml | default('')) +
+          '\n    <gateway_item>\n' +
+          '      <name>' + item.name + '</name>\n' +
+          '      <priority>' + (item.priority | default('255')) + '</priority>\n' +
+          '      <gateway>' + item.gateway + '</gateway>\n' +
+          '      <interface>' + item.interface + '</interface>\n' +
+          '      <defaultgw>' + (item.default | bool | ternary('1', '')) + '</defaultgw>\n' +
+          '      <fargw>' + (item.far | default(false) | bool | ternary('1', '')) + '</fargw>\n' +
+          '      <descr>' + (item.description | default('')) + '</descr>\n' +
+          '      <ipprotocol>' + (item.ipv6 | default(false) | bool | ternary ('inet6', 'inet')) + '</ipprotocol>\n' +
+          '      <monitor_disable>' + (item.monitor | default(false) | bool | ternary('1', '')) + '</monitor_disable>\n' +
+          '      <interval>' + (item.interval | default('1')) + '</interval>\n' +
+          '      <weight>' + (item.weight | default('1')) + '</weight>\n' +
+          '    </gateway_item>' }}
+    loop: "{{ gateways }}"
+
+  - name: Insert Gateway XML
+    replace:
+      path: "{{ install_directory }}/opnsense-config.xml"
+      regexp: '(</opnsense>)'
+      replace: '  <gateways>{{ gateway_xml }}\n  </gateways>\n\1'
+    when: gateway_xml is defined and gateway_xml | length > 0
+  when: gateways is defined and gateways | length > 0
+
+# -------------------------------------------------------------------------------------------------
+# Copy configuration
+# -------------------------------------------------------------------------------------------------
+- name: Copy configuration to the VFAT directory
+  copy:
+    src: "{{ install_directory }}/opnsense-config.xml"
+    dest: "{{ install_directory }}/qemu_{{ vm_id }}_vfat/conf/config.xml"
+    remote_src: true

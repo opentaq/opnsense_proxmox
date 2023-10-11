@@ -1,0 +1,24 @@
+---
+- name: OPNsense - Waiting for OPNsense - Connecting via serial - console
+  wait_for:
+    port: "{{ vm_id }}"
+    host: "localhost"
+    delay: 10
+
+- name: Trigger configuration import via telnet
+  expect:
+    command: "telnet -e ! localhost {{ vm_id }}"
+    timeout: 60
+    echo: true
+    responses:
+      'Press any key to start the configuration importer':
+        - ''
+      'Select device to import from':
+        - 'da1'
+  register: setup_opnsense
+  failed_when: setup_opnsense.msg is search('error')
+
+- name: Debug the OPNsense configuration import
+  debug:
+    msg: "{{ setup_opnsense }}"
+  when: debug is defined and debug

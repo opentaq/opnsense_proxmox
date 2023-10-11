@@ -1,0 +1,10 @@
+---
+- import_tasks: tasks/10_initial_setup.yml
+
+- import_tasks: tasks/20_opnsense_configuration.yml
+
+- import_tasks: tasks/30_opnsense_installation.yml
+
+- import_tasks: tasks/40_opnsense_configuration_import.yml
+
+- import_tasks: tasks/50_cleanup.yml

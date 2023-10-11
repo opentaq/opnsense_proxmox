@@ -1,0 +1,68 @@
+---
+# -------------------------------------------------------------------------------------------------
+# OPNsense Image Handling
+# -------------------------------------------------------------------------------------------------
+- name: Check whether the OPNsense image is already downloaded
+  stat:
+    path: "{{ install_directory }}/{{ opnsense_image_path | basename | regex_replace('.bz2', '') }}"
+  register: opnsense_image
+
+- name: Download OPNsense ISO
+  get_url:
+    url: "{{ opnsense_image_url }}"
+    dest: "{{ opnsense_image_path }}"
+    validate_certs: no
+  when: opnsense_image.stat.exists is not defined or not opnsense_image.stat.exists
+
+- name: Extract OPNsense Nano Image
+  ansible.builtin.shell:
+    cmd: "bzip2 -f -d -v {{ opnsense_image_path }}"
+  when: opnsense_image.stat.exists is not defined or not opnsense_image.stat.exists
+
+# -------------------------------------------------------------------------------------------------
+# OPNsense VM Creation
+# -------------------------------------------------------------------------------------------------
+- name: Stop and Destroy Proxmox VM
+  shell: |
+    qm stop {{ vm_id }}
+    qm destroy {{ vm_id }}
+  ignore_errors: true
+  when: force_clean is defined and force_clean
+
+- name: Create VM for OPNsense
+  shell: |
+    qm create {{ vm_id }} --name {{ vm_name }} --ostype l26 \
+    --sockets {{ vm_sockets | default('1')) }} --cores {{ (vm_cores | default('1')) }} --cpu {{ (vm_cpu_type | default('x86-64-v2-AES')) }} \
+    --onboot {{ vm_start_on_boot | default(true) | bool | ternary('1':'0')}} --agent 1 \
+    --memory {{ vm_memory | default('2048')) }} \
+    --args "-serial tcp:127.0.0.1:{{ vm_id }},server,nowait \
+            -drive file=fat:rw:{{ install_directory }}/qemu_{{ vm_id }}_vfat/,if=none,id=drive-usb0,format=raw,cache=none \
+            -device usb-storage,id=drive-usb0,drive=drive-usb0,removable=on"
+
+- name: Create WAN Network Interface
+  command: "qm set {{ vm_id }} --net0 virtio,bridge={{ wan_bridge }},mtu={{ (wan_mtu | default('1')) }}"
+
+- name: Create Network Interfaces and Assign Bridges
+  command: "qm set {{ vm_id }} --net{{ item.index }} virtio,bridge={{ item.bridge }},mtu={{ (item.mtu | default('1')) }}"
+  loop: "{{ lan_networks }}"
+  loop: "{{ lan_networks }}"
+  loop: "{{ lan_networks }}"
+  register: result
+
+- name: Assign downloaded Nano Image to OPNsense VM
+  shell: "qm importdisk {{ vm_id }} {{ install_directory }}/{{ opnsense_image_path | basename | regex_replace('.bz2', '') }} {{ vm_storage_type }}"
+
+- name: Attach the imported disk to the VM
+  shell: "qm set {{ vm_id }} --scsi0 {{ vm_storage_type }}:vm-{{ vm_id }}-disk-0"
+
+- name: Setup main drive and set Bootdisk
+  shell: |
+    qm set {{ vm_id }} --scsihw virtio-scsi-pci
+    qm set {{ vm_id }} --boot c --bootdisk scsi0
+
+- name: Resize disk
+  shell: "qm resize {{ vm_id }} scsi0 {{ vm_disk_size }}"
+  when: vm_disk_size is defined and vm_disk_size | length > 0
+
+- name: Start the VM
+  command: qm start {{ vm_id }}
