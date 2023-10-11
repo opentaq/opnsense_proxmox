@@ -145,7 +145,7 @@ Example Playbook
 First: Clone the repo into a folder within the `roles`-subfolder:
 
 ```
-mkdir -P opentaq_opnsense/roles
+mkdir -p opentaq_opnsense/roles
 cd opentaq_opnsense/roles
 git clone https://github.com/opentaq/opnsense_proxmox.git
 cd ..
